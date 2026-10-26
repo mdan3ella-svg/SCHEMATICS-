@@ -276,7 +276,111 @@ function plotSheets(){const paper=($('paperSize').value.match(/\d+/g)||[]).map(N
  // All workspace actions remain mounted; hidden groups simply expand on demand.
 })();
 </script>
-</body></html></body></html>`);win.document.close()}}
+<style>
+#schematicsRecovery{position:fixed;right:18px;bottom:18px;width:min(425px,calc(100vw - 36px));z-index:12000;padding:18px 20px;background:#fff;color:#173b31;border:1px solid #b9d3c4;border-radius:14px;box-shadow:0 15px 55px #10271e44;font:13px/1.5 system-ui,sans-serif;display:none}
+#schematicsRecovery strong{font-size:16px}#schematicsRecovery p{margin:9px 0 12px}#schematicsRecovery button{border:1px solid #2b6650;background:#e9f4ec;color:#184631;border-radius:7px;padding:9px 12px;cursor:pointer;margin:2px}#schematicsRecovery button.primary{background:#1e674d;color:white}
+#schematicsFallbackBar{position:absolute;top:8px;left:8px;right:8px;z-index:8;display:none;align-items:center;gap:8px;flex-wrap:wrap;background:#ffffffec;padding:9px;border:1px solid #a8c8b9;border-radius:10px;font:12px system-ui}
+#schematicsFallbackBar button{border:1px solid #8caa99;background:#e7f2ea;border-radius:6px;padding:7px;cursor:pointer}
+</style>
+<div id="schematicsRecovery" role="alertdialog" aria-live="assertive"><strong>SCHEMATICS · 3D engine unavailable</strong><p id="schematicsRecoveryMessage">The Three.js renderer has not initialized. Check your internet connection and WebGL support.</p><button class="primary" id="schematicsTryAgain">Retry 3D</button><button id="schematicsUse2D">Open offline 2D plan editor</button><button id="schematicsDismiss">Dismiss</button></div>
+<script>
+/* Graceful degradation: when the external 3D dependency is unavailable, keep the product usable for local 2D planning. */
+(()=>{
+let ready=false, fallback=false;
+const recovery=document.getElementById('schematicsRecovery');
+const isReady=()=>window.__SCHEMATICS_3D_READY__===true;
+window.addEventListener('schematics-3d-ready',()=>{ready=true;recovery.style.display='none'});
+window.addEventListener('error',e=>{if(!isReady()&&(/three|WebGL|module|import/i.test(e.message||'')||/three|cdn/i.test(e.filename||''))){document.getElementById('schematicsRecoveryMessage').textContent='3D dependency or WebGL startup error: '+(e.message||'module loading failed')+'. Try Retry 3D, or use the offline 2D plan editor.';recovery.style.display='block'}},true);
+setTimeout(()=>{if(!isReady()&&!fallback){recovery.style.display='block'}},8500);
+document.getElementById('schematicsTryAgain').onclick=()=>location.reload();
+document.getElementById('schematicsDismiss').onclick=()=>recovery.style.display='none';
+const css=(s)=>document.querySelector(s);
+document.getElementById('schematicsUse2D').onclick=()=>{
+ if(isReady()){recovery.style.display='none';return}fallback=true;recovery.style.display='none';const welcome=document.getElementById('schematicsWelcome');welcome.classList.add('dismissed');welcome.style.display='none';
+ const canvas=document.getElementById('canvas'),vp=document.getElementById('viewport');
+ if(!canvas||!vp){alert('Workspace canvas not found.');return}
+ const ctx=canvas.getContext('2d');if(!ctx){alert('Canvas 2D is not supported.');return}
+ const grid=65,extent=120;let heights=Array(grid*grid).fill(0).map((_,i)=>3+2*Math.sin(i%grid/8)*Math.cos(Math.floor(i/grid)/9));let objects=[];let mode='select',points=[],selected=-1,dragging=false,scale=4,offset=[0,0],fileName='SCHEMATICS_Offline_Plan';
+ const bar=document.createElement('div');bar.id='schematicsFallbackBar';bar.style.display='flex';bar.innerHTML='<strong>SCHEMATICS · OFFLINE PLAN</strong><span>2D drafting mode · not the 3D BIM renderer</span><button data-fb="select">Select</button><button data-fb="boundary">Boundary</button><button data-fb="parcel">Plot</button><button data-fb="road">Road</button><button data-fb="path">Path</button><button data-fb="tree">Plant</button><button data-fb="finish">Finish</button><button data-fb="save">Save JSON</button><button data-fb="open">Open JSON</button><button data-fb="svg">Export SVG</button><button data-fb="fit">Fit</button><span id="fbStatus" style="font-size:11px">Click to draw; Finish to commit.</span>';
+ vp.style.position='relative';vp.appendChild(bar);vp.style.background='#f4f8f5';canvas.style.display='block';canvas.style.width='100%';canvas.style.height='100%';canvas.style.cursor='crosshair';
+ function resize(){let r=canvas.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2);canvas.width=Math.max(300,Math.round(r.width*d));canvas.height=Math.max(200,Math.round(r.height*d));ctx.setTransform(d,0,0,d,0,0);paint()}
+ function area(poly){let a=0;for(let i=0;i<poly.length;i++){let p=poly[i],q=poly[(i+1)%poly.length];a+=p.x*q.z-q.x*p.z}return Math.abs(a)*.5}
+ function project(p){return {x:canvas.clientWidth/2+(p.x+offset[0])*scale,y:canvas.clientHeight/2-(p.z+offset[1])*scale}}
+ function unproject(x,y){return{x:(x-canvas.clientWidth/2)/scale-offset[0],z:-(y-canvas.clientHeight/2)/scale-offset[1]}}
+ function paint(){if(!fallback)return;const w=canvas.clientWidth,h=canvas.clientHeight;ctx.clearRect(0,0,w,h);ctx.fillStyle='#eef5ec';ctx.fillRect(0,0,w,h);
+ const step=10;ctx.lineWidth=1;ctx.strokeStyle='#d6e3d7';for(let x=-150;x<=150;x+=step){let a=project({x,z:-150}),b=project({x,z:150});ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke()}for(let z=-150;z<=150;z+=step){let a=project({x:-150,z}),b=project({x:150,z});ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke()}
+ for(let x=-50;x<=50;x+=10){ctx.strokeStyle='#95b49d55';ctx.lineWidth=.8;ctx.beginPath();for(let z=-50;z<=50;z+=2){let p=project({x:x+Math.sin(z/13)*2,z});if(z===-50)ctx.moveTo(p.x,p.y);else ctx.lineTo(p.x,p.y)}ctx.stroke()}
+ const colors={boundary:'#455b47',parcel:'#1a8b60',road:'#4b5963',path:'#bf8b4d',tree:'#4f8a4c'};
+ function shape(o,i){ctx.save();ctx.strokeStyle=colors[o.type]||'#366a6a';ctx.lineWidth=i===selected?3:2;ctx.fillStyle='rgba(78,146,97,.10)';if(o.type==='tree'){let p=project(o.points[0]);ctx.beginPath();ctx.arc(p.x,p.y,Math.max(4,scale*1.6),0,Math.PI*2);ctx.fillStyle='#75a97c';ctx.fill();ctx.stroke()}else {ctx.beginPath();o.points.forEach((q,k)=>{let p=project(q);k===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y)});if(['parcel','boundary'].includes(o.type)){ctx.closePath();ctx.fill()}ctx.stroke()}
+ if(o.type==='parcel'){let c={x:o.points.reduce((a,p)=>a+p.x,0)/o.points.length,z:o.points.reduce((a,p)=>a+p.z,0)/o.points.length},p=project(c);ctx.fillStyle='#265141';ctx.font='12px system-ui';ctx.textAlign='center';ctx.fillText((o.name||'LOT')+' · '+area(o.points).toFixed(0)+' m²',p.x,p.y)}ctx.restore()}
+ objects.forEach(shape);if(points.length){ctx.strokeStyle='#df764a';ctx.lineWidth=2;ctx.beginPath();points.forEach((q,i)=>{let p=project(q);i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)});ctx.stroke()}
+ ctx.fillStyle='#1c523d';ctx.font='12px system-ui';ctx.fillText('LOCAL COORDINATES (m) · conceptual drafting — not survey or certified engineering data',15,h-12)}
+ function finish(){if(points.length>=(mode==='parcel'||mode==='boundary'?3:2)){objects.push({id:'OBJ-'+Date.now(),type:mode,points:points.slice(),name:mode==='parcel'?'LOT '+(objects.filter(o=>o.type==='parcel').length+1):mode});selected=objects.length-1}points=[];paint()}
+ function activate(m){if(mode!==m)points=[];mode=m;css('#fbStatus').textContent=m==='select'?'Click to select object':'Click successive positions, then Finish';paint()}
+ bar.addEventListener('click',e=>{let b=e.target.closest('[data-fb]');if(!b)return;let action=b.dataset.fb;if(['select','boundary','parcel','road','path','tree'].includes(action))activate(action);else if(action==='finish')finish();else if(action==='fit'){scale=Math.max(1,Math.min(canvas.clientWidth,canvas.clientHeight)/150);offset=[0,0];paint()}else if(action==='save'){let data=JSON.stringify({format:'SCHEMATICS-OFFLINE-2D',version:1,units:'m',objects,extent,heights},null,2);save(fileName+'.json',data,'application/json')}else if(action==='svg'){let content=objects.map(o=>{let d=o.points.map((p,i)=>`${i?'L':'M'} ${p.x+75} ${75-p.z}`).join(' ')+(o.type==='parcel'||o.type==='boundary'?' Z':'');return `<path d="${d}" stroke="${colors[o.type]||'#555'}" stroke-width="0.35" fill="none"/>`}).join('');save(fileName+'.svg',`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 150">${content}</svg>`,'image/svg+xml')}else if(action==='open'){let inp=document.createElement('input');inp.type='file';inp.accept='.json';inp.onchange=async()=>{try{const d=JSON.parse(await inp.files[0].text());if(!Array.isArray(d.objects))throw Error('Invalid SCHEMATICS data');objects=d.objects.filter(o=>Array.isArray(o.points));selected=-1;paint()}catch(e){alert('Unable to open: '+e.message)}};inp.click()}});
+ function save(n,data,type){let u=URL.createObjectURL(new Blob([data],{type})),a=document.createElement('a');a.href=u;a.download=n;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000)}
+ canvas.addEventListener('click',e=>{let r=canvas.getBoundingClientRect(),p=unproject(e.clientX-r.left,e.clientY-r.top);if(mode==='select'){let best=Infinity;selected=-1;objects.forEach((o,i)=>o.points.forEach(q=>{let d=Math.hypot(p.x-q.x,p.z-q.z);if(d<best&&d<4){best=d;selected=i}}));if(selected>=0)css('#fbStatus').textContent='Selected '+(objects[selected].name||objects[selected].type);paint();return}if(mode==='tree'){objects.push({id:'TREE-'+Date.now(),type:'tree',points:[p]});paint();return}points.push(p);paint()});
+ canvas.addEventListener('dblclick',e=>{e.preventDefault();finish()});canvas.addEventListener('wheel',e=>{e.preventDefault();scale=Math.max(.5,Math.min(40,scale*(e.deltaY<0?1.12:.89)));paint()},{passive:false});
+ document.addEventListener('keydown',e=>{if(!fallback||e.target.matches('input,textarea'))return;if(e.key==='Escape'){points=[];paint()}if(e.key==='Enter')finish();if(e.key==='Delete'&&selected>=0){objects.splice(selected,1);selected=-1;paint()}});
+ document.querySelectorAll('[data-tool]').forEach(b=>b.addEventListener('click',()=>{let t=b.dataset.tool;if(['select','boundary','parcel','road','path','tree'].includes(t))activate(t)},true));
+ window.addEventListener('resize',resize);resize();activate('select');
+ const st=document.getElementById('statusText');if(st)st.textContent='OFFLINE 2D PLAN MODE · 3D modules did not load · save your work as JSON';
+ }
+})();
+</script>
+</body></html><style>
+#schematicsRecovery{position:fixed;right:18px;bottom:18px;width:min(425px,calc(100vw - 36px));z-index:12000;padding:18px 20px;background:#fff;color:#173b31;border:1px solid #b9d3c4;border-radius:14px;box-shadow:0 15px 55px #10271e44;font:13px/1.5 system-ui,sans-serif;display:none}
+#schematicsRecovery strong{font-size:16px}#schematicsRecovery p{margin:9px 0 12px}#schematicsRecovery button{border:1px solid #2b6650;background:#e9f4ec;color:#184631;border-radius:7px;padding:9px 12px;cursor:pointer;margin:2px}#schematicsRecovery button.primary{background:#1e674d;color:white}
+#schematicsFallbackBar{position:absolute;top:8px;left:8px;right:8px;z-index:8;display:none;align-items:center;gap:8px;flex-wrap:wrap;background:#ffffffec;padding:9px;border:1px solid #a8c8b9;border-radius:10px;font:12px system-ui}
+#schematicsFallbackBar button{border:1px solid #8caa99;background:#e7f2ea;border-radius:6px;padding:7px;cursor:pointer}
+</style>
+<div id="schematicsRecovery" role="alertdialog" aria-live="assertive"><strong>SCHEMATICS · 3D engine unavailable</strong><p id="schematicsRecoveryMessage">The Three.js renderer has not initialized. Check your internet connection and WebGL support.</p><button class="primary" id="schematicsTryAgain">Retry 3D</button><button id="schematicsUse2D">Open offline 2D plan editor</button><button id="schematicsDismiss">Dismiss</button></div>
+<script>
+/* Graceful degradation: when the external 3D dependency is unavailable, keep the product usable for local 2D planning. */
+(()=>{
+let ready=false, fallback=false;
+const recovery=document.getElementById('schematicsRecovery');
+const isReady=()=>window.__SCHEMATICS_3D_READY__===true;
+window.addEventListener('schematics-3d-ready',()=>{ready=true;recovery.style.display='none'});
+window.addEventListener('error',e=>{if(!isReady()&&(/three|WebGL|module|import/i.test(e.message||'')||/three|cdn/i.test(e.filename||''))){document.getElementById('schematicsRecoveryMessage').textContent='3D dependency or WebGL startup error: '+(e.message||'module loading failed')+'. Try Retry 3D, or use the offline 2D plan editor.';recovery.style.display='block'}},true);
+setTimeout(()=>{if(!isReady()&&!fallback){recovery.style.display='block'}},8500);
+document.getElementById('schematicsTryAgain').onclick=()=>location.reload();
+document.getElementById('schematicsDismiss').onclick=()=>recovery.style.display='none';
+const css=(s)=>document.querySelector(s);
+document.getElementById('schematicsUse2D').onclick=()=>{
+ if(isReady()){recovery.style.display='none';return}fallback=true;recovery.style.display='none';const welcome=document.getElementById('schematicsWelcome');welcome.classList.add('dismissed');welcome.style.display='none';
+ const canvas=document.getElementById('canvas'),vp=document.getElementById('viewport');
+ if(!canvas||!vp){alert('Workspace canvas not found.');return}
+ const ctx=canvas.getContext('2d');if(!ctx){alert('Canvas 2D is not supported.');return}
+ const grid=65,extent=120;let heights=Array(grid*grid).fill(0).map((_,i)=>3+2*Math.sin(i%grid/8)*Math.cos(Math.floor(i/grid)/9));let objects=[];let mode='select',points=[],selected=-1,dragging=false,scale=4,offset=[0,0],fileName='SCHEMATICS_Offline_Plan';
+ const bar=document.createElement('div');bar.id='schematicsFallbackBar';bar.style.display='flex';bar.innerHTML='<strong>SCHEMATICS · OFFLINE PLAN</strong><span>2D drafting mode · not the 3D BIM renderer</span><button data-fb="select">Select</button><button data-fb="boundary">Boundary</button><button data-fb="parcel">Plot</button><button data-fb="road">Road</button><button data-fb="path">Path</button><button data-fb="tree">Plant</button><button data-fb="finish">Finish</button><button data-fb="save">Save JSON</button><button data-fb="open">Open JSON</button><button data-fb="svg">Export SVG</button><button data-fb="fit">Fit</button><span id="fbStatus" style="font-size:11px">Click to draw; Finish to commit.</span>';
+ vp.style.position='relative';vp.appendChild(bar);vp.style.background='#f4f8f5';canvas.style.display='block';canvas.style.width='100%';canvas.style.height='100%';canvas.style.cursor='crosshair';
+ function resize(){let r=canvas.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2);canvas.width=Math.max(300,Math.round(r.width*d));canvas.height=Math.max(200,Math.round(r.height*d));ctx.setTransform(d,0,0,d,0,0);paint()}
+ function area(poly){let a=0;for(let i=0;i<poly.length;i++){let p=poly[i],q=poly[(i+1)%poly.length];a+=p.x*q.z-q.x*p.z}return Math.abs(a)*.5}
+ function project(p){return {x:canvas.clientWidth/2+(p.x+offset[0])*scale,y:canvas.clientHeight/2-(p.z+offset[1])*scale}}
+ function unproject(x,y){return{x:(x-canvas.clientWidth/2)/scale-offset[0],z:-(y-canvas.clientHeight/2)/scale-offset[1]}}
+ function paint(){if(!fallback)return;const w=canvas.clientWidth,h=canvas.clientHeight;ctx.clearRect(0,0,w,h);ctx.fillStyle='#eef5ec';ctx.fillRect(0,0,w,h);
+ const step=10;ctx.lineWidth=1;ctx.strokeStyle='#d6e3d7';for(let x=-150;x<=150;x+=step){let a=project({x,z:-150}),b=project({x,z:150});ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke()}for(let z=-150;z<=150;z+=step){let a=project({x:-150,z}),b=project({x:150,z});ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke()}
+ for(let x=-50;x<=50;x+=10){ctx.strokeStyle='#95b49d55';ctx.lineWidth=.8;ctx.beginPath();for(let z=-50;z<=50;z+=2){let p=project({x:x+Math.sin(z/13)*2,z});if(z===-50)ctx.moveTo(p.x,p.y);else ctx.lineTo(p.x,p.y)}ctx.stroke()}
+ const colors={boundary:'#455b47',parcel:'#1a8b60',road:'#4b5963',path:'#bf8b4d',tree:'#4f8a4c'};
+ function shape(o,i){ctx.save();ctx.strokeStyle=colors[o.type]||'#366a6a';ctx.lineWidth=i===selected?3:2;ctx.fillStyle='rgba(78,146,97,.10)';if(o.type==='tree'){let p=project(o.points[0]);ctx.beginPath();ctx.arc(p.x,p.y,Math.max(4,scale*1.6),0,Math.PI*2);ctx.fillStyle='#75a97c';ctx.fill();ctx.stroke()}else {ctx.beginPath();o.points.forEach((q,k)=>{let p=project(q);k===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y)});if(['parcel','boundary'].includes(o.type)){ctx.closePath();ctx.fill()}ctx.stroke()}
+ if(o.type==='parcel'){let c={x:o.points.reduce((a,p)=>a+p.x,0)/o.points.length,z:o.points.reduce((a,p)=>a+p.z,0)/o.points.length},p=project(c);ctx.fillStyle='#265141';ctx.font='12px system-ui';ctx.textAlign='center';ctx.fillText((o.name||'LOT')+' · '+area(o.points).toFixed(0)+' m²',p.x,p.y)}ctx.restore()}
+ objects.forEach(shape);if(points.length){ctx.strokeStyle='#df764a';ctx.lineWidth=2;ctx.beginPath();points.forEach((q,i)=>{let p=project(q);i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)});ctx.stroke()}
+ ctx.fillStyle='#1c523d';ctx.font='12px system-ui';ctx.fillText('LOCAL COORDINATES (m) · conceptual drafting — not survey or certified engineering data',15,h-12)}
+ function finish(){if(points.length>=(mode==='parcel'||mode==='boundary'?3:2)){objects.push({id:'OBJ-'+Date.now(),type:mode,points:points.slice(),name:mode==='parcel'?'LOT '+(objects.filter(o=>o.type==='parcel').length+1):mode});selected=objects.length-1}points=[];paint()}
+ function activate(m){if(mode!==m)points=[];mode=m;css('#fbStatus').textContent=m==='select'?'Click to select object':'Click successive positions, then Finish';paint()}
+ bar.addEventListener('click',e=>{let b=e.target.closest('[data-fb]');if(!b)return;let action=b.dataset.fb;if(['select','boundary','parcel','road','path','tree'].includes(action))activate(action);else if(action==='finish')finish();else if(action==='fit'){scale=Math.max(1,Math.min(canvas.clientWidth,canvas.clientHeight)/150);offset=[0,0];paint()}else if(action==='save'){let data=JSON.stringify({format:'SCHEMATICS-OFFLINE-2D',version:1,units:'m',objects,extent,heights},null,2);save(fileName+'.json',data,'application/json')}else if(action==='svg'){let content=objects.map(o=>{let d=o.points.map((p,i)=>`${i?'L':'M'} ${p.x+75} ${75-p.z}`).join(' ')+(o.type==='parcel'||o.type==='boundary'?' Z':'');return `<path d="${d}" stroke="${colors[o.type]||'#555'}" stroke-width="0.35" fill="none"/>`}).join('');save(fileName+'.svg',`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 150">${content}</svg>`,'image/svg+xml')}else if(action==='open'){let inp=document.createElement('input');inp.type='file';inp.accept='.json';inp.onchange=async()=>{try{const d=JSON.parse(await inp.files[0].text());if(!Array.isArray(d.objects))throw Error('Invalid SCHEMATICS data');objects=d.objects.filter(o=>Array.isArray(o.points));selected=-1;paint()}catch(e){alert('Unable to open: '+e.message)}};inp.click()}});
+ function save(n,data,type){let u=URL.createObjectURL(new Blob([data],{type})),a=document.createElement('a');a.href=u;a.download=n;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000)}
+ canvas.addEventListener('click',e=>{let r=canvas.getBoundingClientRect(),p=unproject(e.clientX-r.left,e.clientY-r.top);if(mode==='select'){let best=Infinity;selected=-1;objects.forEach((o,i)=>o.points.forEach(q=>{let d=Math.hypot(p.x-q.x,p.z-q.z);if(d<best&&d<4){best=d;selected=i}}));if(selected>=0)css('#fbStatus').textContent='Selected '+(objects[selected].name||objects[selected].type);paint();return}if(mode==='tree'){objects.push({id:'TREE-'+Date.now(),type:'tree',points:[p]});paint();return}points.push(p);paint()});
+ canvas.addEventListener('dblclick',e=>{e.preventDefault();finish()});canvas.addEventListener('wheel',e=>{e.preventDefault();scale=Math.max(.5,Math.min(40,scale*(e.deltaY<0?1.12:.89)));paint()},{passive:false});
+ document.addEventListener('keydown',e=>{if(!fallback||e.target.matches('input,textarea'))return;if(e.key==='Escape'){points=[];paint()}if(e.key==='Enter')finish();if(e.key==='Delete'&&selected>=0){objects.splice(selected,1);selected=-1;paint()}});
+ document.querySelectorAll('[data-tool]').forEach(b=>b.addEventListener('click',()=>{let t=b.dataset.tool;if(['select','boundary','parcel','road','path','tree'].includes(t))activate(t)},true));
+ window.addEventListener('resize',resize);resize();activate('select');
+ const st=document.getElementById('statusText');if(st)st.textContent='OFFLINE 2D PLAN MODE · 3D modules did not load · save your work as JSON';
+ }
+})();
+</script>
+</body></html>`);win.document.close()}}
 $('arcTool').onclick=()=>{arcPick=[];setTool('select');openModal('3-point arc drafting',`<p>Specify three 2D plan positions as X/Z coordinates in metres, passing through start, through-point and end. The generated arc uses sampled circular geometry and can be edited as a polyline. It is not a persistent analytic tangent-arc constraint.</p>${['Start','Through','End'].map((v,i)=>`<div class="field"><label>${v} X / Z (m)</label><div style="display:flex;gap:8px"><input id="arcx${i}" type="number" value="${[-20,0,20][i]}" step="any"><input id="arcz${i}" type="number" value="${[0,15,0][i]}" step="any"></div></div>`).join('')}<button class="button primary" id="createArc">Create editable circular arc</button>`);$('createArc').onclick=()=>{try{let ps=[0,1,2].map(i=>({x:asNum($('arcx'+i).value),z:asNum($('arcz'+i).value)})),points=arcPoints(...ps);snapshot();let o={id:'ARC-'+Date.now(),type:'path',name:'Circular arc',width:1.5,points,layer:$('activeLayer').value,arcDefinition:{controlPoints:ps}};objects.push(o);rebuild();selectObject(o);$('modalbg').classList.remove('open');toast('Circular arc created as editable sampled geometry')}catch(e){toast(e.message)}}};$('constraintsTool').onclick=constraintDialog;$('dimensionTool').onclick=makeDimension;$('topologyTool').onclick=topologyReport;$('civilAuditTool').onclick=earthworkAudit;$('plotSheetTool').onclick=plotSheets;
 
 $('subdivideBtn').onclick=()=>{try{subdivide()}catch(e){toast(e.message)}};$('planningReportBtn').onclick=planningReport;$('planningSheetBtn').onclick=()=>planningSheet(false);$('sheetPreviewBtn').onclick=()=>planningSheet(true);$('geojsonBtn').onclick=geojsonExport;$('xrefBtn').onclick=()=>$('xrefInput').click();$('xrefInput').onchange=async e=>{await importXrefs([...e.target.files]);e.target.value=''};$('xrefManageBtn').onclick=xrefManager;$('showPlanning').onchange=()=>planningGroup.visible=$('showPlanning').checked;$('showXrefs').onchange=()=>xrefGroup.visible=$('showXrefs').checked;
@@ -419,6 +523,7 @@ function coordinationSuite(){
 coordinationSuite();
 
 uiLayers();init();
+if(renderer && scene && camera){window.__SCHEMATICS_3D_READY__=true; window.dispatchEvent(new Event('schematics-3d-ready'));}
 </script>
 <script>
 /* Welcome is intentionally independent of the WebGL module: navigation stays usable even if a CDN is offline. */
@@ -445,6 +550,58 @@ uiLayers();init();
  // A return-to-welcome entry point appears in the main application header.
  const top=document.querySelector('.topactions');if(top){const btn=document.createElement('button');btn.className='button';btn.textContent='Welcome';btn.title='Open SCHEMATICS splash screen';btn.onclick=()=>{welcome.style.display='';welcome.removeAttribute('aria-hidden');requestAnimationFrame(()=>welcome.classList.remove('dismissed'))};top.insertBefore(btn,top.firstChild)}
  choose('overview');
+})();
+</script>
+<style>
+#schematicsRecovery{position:fixed;right:18px;bottom:18px;width:min(425px,calc(100vw - 36px));z-index:12000;padding:18px 20px;background:#fff;color:#173b31;border:1px solid #b9d3c4;border-radius:14px;box-shadow:0 15px 55px #10271e44;font:13px/1.5 system-ui,sans-serif;display:none}
+#schematicsRecovery strong{font-size:16px}#schematicsRecovery p{margin:9px 0 12px}#schematicsRecovery button{border:1px solid #2b6650;background:#e9f4ec;color:#184631;border-radius:7px;padding:9px 12px;cursor:pointer;margin:2px}#schematicsRecovery button.primary{background:#1e674d;color:white}
+#schematicsFallbackBar{position:absolute;top:8px;left:8px;right:8px;z-index:8;display:none;align-items:center;gap:8px;flex-wrap:wrap;background:#ffffffec;padding:9px;border:1px solid #a8c8b9;border-radius:10px;font:12px system-ui}
+#schematicsFallbackBar button{border:1px solid #8caa99;background:#e7f2ea;border-radius:6px;padding:7px;cursor:pointer}
+</style>
+<div id="schematicsRecovery" role="alertdialog" aria-live="assertive"><strong>SCHEMATICS · 3D engine unavailable</strong><p id="schematicsRecoveryMessage">The Three.js renderer has not initialized. Check your internet connection and WebGL support.</p><button class="primary" id="schematicsTryAgain">Retry 3D</button><button id="schematicsUse2D">Open offline 2D plan editor</button><button id="schematicsDismiss">Dismiss</button></div>
+<script>
+/* Graceful degradation: when the external 3D dependency is unavailable, keep the product usable for local 2D planning. */
+(()=>{
+let ready=false, fallback=false;
+const recovery=document.getElementById('schematicsRecovery');
+const isReady=()=>window.__SCHEMATICS_3D_READY__===true;
+window.addEventListener('schematics-3d-ready',()=>{ready=true;recovery.style.display='none'});
+window.addEventListener('error',e=>{if(!isReady()&&(/three|WebGL|module|import/i.test(e.message||'')||/three|cdn/i.test(e.filename||''))){document.getElementById('schematicsRecoveryMessage').textContent='3D dependency or WebGL startup error: '+(e.message||'module loading failed')+'. Try Retry 3D, or use the offline 2D plan editor.';recovery.style.display='block'}},true);
+setTimeout(()=>{if(!isReady()&&!fallback){recovery.style.display='block'}},8500);
+document.getElementById('schematicsTryAgain').onclick=()=>location.reload();
+document.getElementById('schematicsDismiss').onclick=()=>recovery.style.display='none';
+const css=(s)=>document.querySelector(s);
+document.getElementById('schematicsUse2D').onclick=()=>{
+ if(isReady()){recovery.style.display='none';return}fallback=true;recovery.style.display='none';const welcome=document.getElementById('schematicsWelcome');welcome.classList.add('dismissed');welcome.style.display='none';
+ const canvas=document.getElementById('canvas'),vp=document.getElementById('viewport');
+ if(!canvas||!vp){alert('Workspace canvas not found.');return}
+ const ctx=canvas.getContext('2d');if(!ctx){alert('Canvas 2D is not supported.');return}
+ const grid=65,extent=120;let heights=Array(grid*grid).fill(0).map((_,i)=>3+2*Math.sin(i%grid/8)*Math.cos(Math.floor(i/grid)/9));let objects=[];let mode='select',points=[],selected=-1,dragging=false,scale=4,offset=[0,0],fileName='SCHEMATICS_Offline_Plan';
+ const bar=document.createElement('div');bar.id='schematicsFallbackBar';bar.style.display='flex';bar.innerHTML='<strong>SCHEMATICS · OFFLINE PLAN</strong><span>2D drafting mode · not the 3D BIM renderer</span><button data-fb="select">Select</button><button data-fb="boundary">Boundary</button><button data-fb="parcel">Plot</button><button data-fb="road">Road</button><button data-fb="path">Path</button><button data-fb="tree">Plant</button><button data-fb="finish">Finish</button><button data-fb="save">Save JSON</button><button data-fb="open">Open JSON</button><button data-fb="svg">Export SVG</button><button data-fb="fit">Fit</button><span id="fbStatus" style="font-size:11px">Click to draw; Finish to commit.</span>';
+ vp.style.position='relative';vp.appendChild(bar);vp.style.background='#f4f8f5';canvas.style.display='block';canvas.style.width='100%';canvas.style.height='100%';canvas.style.cursor='crosshair';
+ function resize(){let r=canvas.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2);canvas.width=Math.max(300,Math.round(r.width*d));canvas.height=Math.max(200,Math.round(r.height*d));ctx.setTransform(d,0,0,d,0,0);paint()}
+ function area(poly){let a=0;for(let i=0;i<poly.length;i++){let p=poly[i],q=poly[(i+1)%poly.length];a+=p.x*q.z-q.x*p.z}return Math.abs(a)*.5}
+ function project(p){return {x:canvas.clientWidth/2+(p.x+offset[0])*scale,y:canvas.clientHeight/2-(p.z+offset[1])*scale}}
+ function unproject(x,y){return{x:(x-canvas.clientWidth/2)/scale-offset[0],z:-(y-canvas.clientHeight/2)/scale-offset[1]}}
+ function paint(){if(!fallback)return;const w=canvas.clientWidth,h=canvas.clientHeight;ctx.clearRect(0,0,w,h);ctx.fillStyle='#eef5ec';ctx.fillRect(0,0,w,h);
+ const step=10;ctx.lineWidth=1;ctx.strokeStyle='#d6e3d7';for(let x=-150;x<=150;x+=step){let a=project({x,z:-150}),b=project({x,z:150});ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke()}for(let z=-150;z<=150;z+=step){let a=project({x:-150,z}),b=project({x:150,z});ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke()}
+ for(let x=-50;x<=50;x+=10){ctx.strokeStyle='#95b49d55';ctx.lineWidth=.8;ctx.beginPath();for(let z=-50;z<=50;z+=2){let p=project({x:x+Math.sin(z/13)*2,z});if(z===-50)ctx.moveTo(p.x,p.y);else ctx.lineTo(p.x,p.y)}ctx.stroke()}
+ const colors={boundary:'#455b47',parcel:'#1a8b60',road:'#4b5963',path:'#bf8b4d',tree:'#4f8a4c'};
+ function shape(o,i){ctx.save();ctx.strokeStyle=colors[o.type]||'#366a6a';ctx.lineWidth=i===selected?3:2;ctx.fillStyle='rgba(78,146,97,.10)';if(o.type==='tree'){let p=project(o.points[0]);ctx.beginPath();ctx.arc(p.x,p.y,Math.max(4,scale*1.6),0,Math.PI*2);ctx.fillStyle='#75a97c';ctx.fill();ctx.stroke()}else {ctx.beginPath();o.points.forEach((q,k)=>{let p=project(q);k===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y)});if(['parcel','boundary'].includes(o.type)){ctx.closePath();ctx.fill()}ctx.stroke()}
+ if(o.type==='parcel'){let c={x:o.points.reduce((a,p)=>a+p.x,0)/o.points.length,z:o.points.reduce((a,p)=>a+p.z,0)/o.points.length},p=project(c);ctx.fillStyle='#265141';ctx.font='12px system-ui';ctx.textAlign='center';ctx.fillText((o.name||'LOT')+' · '+area(o.points).toFixed(0)+' m²',p.x,p.y)}ctx.restore()}
+ objects.forEach(shape);if(points.length){ctx.strokeStyle='#df764a';ctx.lineWidth=2;ctx.beginPath();points.forEach((q,i)=>{let p=project(q);i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)});ctx.stroke()}
+ ctx.fillStyle='#1c523d';ctx.font='12px system-ui';ctx.fillText('LOCAL COORDINATES (m) · conceptual drafting — not survey or certified engineering data',15,h-12)}
+ function finish(){if(points.length>=(mode==='parcel'||mode==='boundary'?3:2)){objects.push({id:'OBJ-'+Date.now(),type:mode,points:points.slice(),name:mode==='parcel'?'LOT '+(objects.filter(o=>o.type==='parcel').length+1):mode});selected=objects.length-1}points=[];paint()}
+ function activate(m){if(mode!==m)points=[];mode=m;css('#fbStatus').textContent=m==='select'?'Click to select object':'Click successive positions, then Finish';paint()}
+ bar.addEventListener('click',e=>{let b=e.target.closest('[data-fb]');if(!b)return;let action=b.dataset.fb;if(['select','boundary','parcel','road','path','tree'].includes(action))activate(action);else if(action==='finish')finish();else if(action==='fit'){scale=Math.max(1,Math.min(canvas.clientWidth,canvas.clientHeight)/150);offset=[0,0];paint()}else if(action==='save'){let data=JSON.stringify({format:'SCHEMATICS-OFFLINE-2D',version:1,units:'m',objects,extent,heights},null,2);save(fileName+'.json',data,'application/json')}else if(action==='svg'){let content=objects.map(o=>{let d=o.points.map((p,i)=>`${i?'L':'M'} ${p.x+75} ${75-p.z}`).join(' ')+(o.type==='parcel'||o.type==='boundary'?' Z':'');return `<path d="${d}" stroke="${colors[o.type]||'#555'}" stroke-width="0.35" fill="none"/>`}).join('');save(fileName+'.svg',`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 150">${content}</svg>`,'image/svg+xml')}else if(action==='open'){let inp=document.createElement('input');inp.type='file';inp.accept='.json';inp.onchange=async()=>{try{const d=JSON.parse(await inp.files[0].text());if(!Array.isArray(d.objects))throw Error('Invalid SCHEMATICS data');objects=d.objects.filter(o=>Array.isArray(o.points));selected=-1;paint()}catch(e){alert('Unable to open: '+e.message)}};inp.click()}});
+ function save(n,data,type){let u=URL.createObjectURL(new Blob([data],{type})),a=document.createElement('a');a.href=u;a.download=n;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000)}
+ canvas.addEventListener('click',e=>{let r=canvas.getBoundingClientRect(),p=unproject(e.clientX-r.left,e.clientY-r.top);if(mode==='select'){let best=Infinity;selected=-1;objects.forEach((o,i)=>o.points.forEach(q=>{let d=Math.hypot(p.x-q.x,p.z-q.z);if(d<best&&d<4){best=d;selected=i}}));if(selected>=0)css('#fbStatus').textContent='Selected '+(objects[selected].name||objects[selected].type);paint();return}if(mode==='tree'){objects.push({id:'TREE-'+Date.now(),type:'tree',points:[p]});paint();return}points.push(p);paint()});
+ canvas.addEventListener('dblclick',e=>{e.preventDefault();finish()});canvas.addEventListener('wheel',e=>{e.preventDefault();scale=Math.max(.5,Math.min(40,scale*(e.deltaY<0?1.12:.89)));paint()},{passive:false});
+ document.addEventListener('keydown',e=>{if(!fallback||e.target.matches('input,textarea'))return;if(e.key==='Escape'){points=[];paint()}if(e.key==='Enter')finish();if(e.key==='Delete'&&selected>=0){objects.splice(selected,1);selected=-1;paint()}});
+ document.querySelectorAll('[data-tool]').forEach(b=>b.addEventListener('click',()=>{let t=b.dataset.tool;if(['select','boundary','parcel','road','path','tree'].includes(t))activate(t)},true));
+ window.addEventListener('resize',resize);resize();activate('select');
+ const st=document.getElementById('statusText');if(st)st.textContent='OFFLINE 2D PLAN MODE · 3D modules did not load · save your work as JSON';
+ }
 })();
 </script>
 </body></html>
